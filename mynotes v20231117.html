@@ -1,0 +1,574 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <!-- Include stylesheet -->
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+
+    <title>人类第一个所有代码由AI完成的笔记软件,耗时9个人时包括技术选型js语言学习indexedDB和Quill的学习,YL Deng,20231117</title>
+    <style>
+        #container {
+          display: flex;
+          height: 100vh;
+        }
+
+        #doc-list {
+          width: 30%;
+          overflow: auto;
+        }
+
+        #resizer {
+          cursor: col-resize;
+          flex: 0 0 10px;
+          background-color: #ccc;
+        }
+
+        #editor {
+          flex-grow: 1;
+          overflow: auto;
+        }
+
+        #title {
+          width: 100%;
+        }
+    </style>
+
+</head>
+
+<body>
+
+<!--
+    <button id="new-doc">新建文档</button>
+    <button id="save-doc">保存</button>
+    <div id="doc-list"></div>
+
+    <div id="editor">
+      <p>Hello World!</p>
+      <p><br></p>
+    </div>
+
+-->
+
+    <button id="new-doc">新建文档</button>
+    <button id="save-doc">保存</button>
+    <div id="container">
+      <div id="doc-list"></div>
+      <div id="resizer"></div>
+      <div id="editor">
+      <input type="text" id="title" placeholder="新建笔记">
+      <div id="quill">
+        <p>Hello World!</p>
+        <p><br></p>
+      </div>
+      </div>
+    </div>
+
+    <!-- Include the Quill library -->
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+
+
+    <!-- Initialize Quill editor -->
+    <script>
+      // 全局变量
+      let db;
+      let current_doc_id;
+      let current_dir_id;
+      let current_dir_json;
+
+      // 创建全局唯一序列号
+      function create_UUID(){
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+              let r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+              return v.toString(16);
+          });
+      }
+
+      function init_mynotes() {
+          // 打开indexedDB
+          request = window.indexedDB.open("myNotesDB", 1);
+
+          request.onerror = function(event) {
+              console.log("Database error: " + event.target.errorCode);
+          };
+
+          request.onsuccess = function(event) {
+              db = request.result;
+              console.log("Database initialised successfully");
+
+              // 调用display_dir_list函数
+              load_dir("0").then(data => {
+                  current_dir_json = data;
+                  current_dir_id = "0";
+                  display_dir_list(data);
+              }).catch(error => {
+                  console.error(error);
+              });
+
+          };
+
+          request.onupgradeneeded = function(event) {
+              db = event.target.result;
+              objectStore = db.createObjectStore("notes");
+              console.log("ObjectStore created successfully");
+          };
+      }
+
+
+
+
+
+
+
+
+      function highLightListItem(id) {
+          // 获取指定id的文档
+          let doc = document.querySelector(`div[data-id='${id}']`);
+          // 如果文档存在，那么高亮显示
+          if(doc) {
+              doc.style.backgroundColor = "lightblue";
+          }
+      }
+
+      function unHighLightListItem(id) {
+          // 获取指定id的文档
+          let doc = document.querySelector(`div[data-id='${id}']`);
+          // 如果文档存在，那么高亮显示
+          if(doc) {
+              doc.style.backgroundColor = "";
+          }
+      }
+
+
+
+
+
+
+
+
+      async function load_dir(id) {
+          return new Promise((resolve, reject) => {
+              const transaction = db.transaction("notes", "readwrite");
+              const objectStore = transaction.objectStore("notes");
+
+              let request = objectStore.get(id);
+
+              request.onerror = function(event) {
+                  console.log("Unable to retrieve data from database!");
+                  reject("Unable to retrieve data from database!");
+              };
+
+              request.onsuccess = function(event) {
+                  if(request.result) {
+                      let data = request.result;
+                      if(data.indexedDB_mynotes_directory && Array.isArray(data.items)) {
+                          console.log("load dir successful!");
+                          console.log(data);
+                          resolve(data);
+                      }
+                  } 
+
+                  let newData = {
+                      indexedDB_mynotes_directory: true,
+                      items: [{"id": "example"}]
+                  };
+
+                  let addRequest = objectStore.add(newData, id);
+
+                  addRequest.onerror = function(event) {
+                      console.log("Unable to add data to database!");
+                      reject("Unable to add data to database!");
+                  };
+
+                  addRequest.onsuccess = function(event) {
+                      resolve(load_dir(id));
+                  };
+              };
+          });
+      }
+
+
+      async function display_dir_list(data) {
+            // 获取doc-list元素
+            let docList = document.getElementById('doc-list');
+
+            // 清空doc-list元素
+            docList.innerHTML = '';
+
+            // 遍历数据，为每个项目创建一个新的div元素
+            //try
+            {
+              for(let item of data.items) {
+                  let div = document.createElement('div');
+
+                  // 根据项目的类型设置div的样式
+                  if(item.type === 'DIR') {
+                      div.className = 'directory';
+                      div.dataset.type = 'DIR';
+                  } else {
+                      div.className = 'file';
+                      div.dataset.type = 'FILE';
+                  }
+
+                  // 设置div的内容
+                  div.textContent = item.title;
+                  div.dataset.id = item.id;
+                  div.dataset.title = item.title;
+
+                  // 文件doc-list click事件
+                  div.addEventListener('click', function() {
+                    if(this.dataset.type === 'DIR')
+                    {
+                      /*
+                      TODO
+
+                      saveQuill(current_doc_id, quill);
+                      load_dir(this.dataset.id).then(data => {
+                          current_dir_json = data;
+                          display_dir_list(data);
+                      }).catch(error => {
+                          console.error(error);
+                      });
+                      
+                      */
+                    }
+                    else //FILE
+                    {
+                      if(this.dataset.id !== current_doc_id)
+                      {
+                        // 点击 div 时要执行的代码
+                        console.log('点击了 id 为 ' + this.dataset.id + ' 的 div！');
+
+                        // save old doc
+                        saveQuill(current_doc_id, quill);
+                        // old div 退去高亮
+                        unHighLightListItem(current_doc_id);
+
+                        //load new doc
+                        document.getElementById('title').value = this.dataset.title;
+                        loadToQuill(this.dataset.id, quill);
+                        // new div 高亮
+                        highLightListItem(this.dataset.id);
+
+
+                      }
+
+                    }
+
+                  });
+
+                  // 将div添加到doc-list元素中
+                  docList.appendChild(div);
+              }
+            } 
+            //catch(e)
+            {
+
+            }
+
+      }
+
+
+
+
+
+
+
+
+
+
+      function updateTitleInJson(json, id, newTitle) {
+          for (var i = 0; i < json.items.length; i++) {
+              if (json.items[i].id === id) {
+                  json.items[i].title = newTitle;
+                  break;
+              }
+          }
+          return json;
+      }
+
+
+      function addDocToDirJson(json, new_id, createDataTime) {
+          var title = document.getElementById('title').value;
+          var newItem = { id: new_id , title: title, createDataTime: createDataTime};
+          json.items.push(newItem);
+
+          return json;
+      }
+
+
+
+
+
+
+
+
+
+
+
+
+
+      // 清空Quill编辑器
+      function clearEditor() {
+          quill.setContents([{ insert: '\n' }]);
+      }
+
+      function resetTitle() {
+        // 获取当前日期和时间
+        var currentdate = new Date(); 
+        var datetime = currentdate.getFullYear() + "-"
+                      + (currentdate.getMonth()+1)  + "-" 
+                      + currentdate.getDate() + " "  
+                      + currentdate.getHours() + ":"  
+                      + currentdate.getMinutes() + ":" 
+                      + currentdate.getSeconds();
+
+        // 获取title输入框并设置其值
+        var titleInput = document.getElementById('title');
+        titleInput.value = '新建笔记 ' + datetime;
+      }
+
+
+
+
+
+
+
+
+
+
+
+
+
+      // 在IndexedDB中写入key-value对
+      function writeDB(id, value) {
+          let transaction = db.transaction("notes", "readwrite");
+          let notes = transaction.objectStore("notes");
+          let request = notes.put(value, id);
+
+          request.onsuccess = function() {
+              console.log("Note has been added to your database.");
+          };
+
+          request.onerror = function(event) {
+              console.log("Unable to add data\r\nNote is aready exist in your database! ");
+          }
+      }
+
+
+      function updateDBValue(id, newValue) {
+          var tx = db.transaction("notes", 'readwrite');
+          var store = tx.objectStore("notes");
+
+          var request = store.get(id);
+
+          request.onsuccess = function(e) {
+              var data = e.target.result;
+              data = newValue;
+
+              var updateRequest = store.put(data, id);
+
+              updateRequest.onsuccess = function(e) {
+                  console.log('Update successful');
+              };
+
+              updateRequest.onerror = function(e) {
+                  console.log('Update failed');
+              };
+          };
+
+          request.onerror = function(e) {
+              console.log('Error occurred while getting data');
+          };
+      }
+
+
+
+
+
+
+
+
+
+
+
+
+      function saveQuill(doc_id, quill) {
+          //如果当前没有打开的文档
+          if(typeof doc_id === 'undefined')
+          {
+            console.log("saveQuill doc_id undefined");
+            return;
+          }
+
+          // 开始一个新的事务
+          const transaction = db.transaction("notes", "readwrite");
+          const objectStore = transaction.objectStore("notes");
+          
+          // 获取Quill的内容
+          const content = quill.getContents();
+          
+          // 将内容保存到IndexedDB
+          console.log(doc_id);
+          console.log(content);
+          const request = objectStore.put({ id:doc_id, content:content }, doc_id);
+          
+          request.onsuccess = function(event) {
+              console.log("Quill content saved successfully.");
+              var saveButton = document.querySelector('#save-doc');
+              saveButton.disabled = true;
+
+          };
+          
+          request.onerror = function(event) {
+              console.log("Failed to save Quill content: ", event.target.error);
+          };
+      }
+
+      function loadToQuill(id, quill) {
+          // 开始一个新的事务
+          const transaction = db.transaction("notes", "readonly");
+          const objectStore = transaction.objectStore("notes");
+
+          // 从IndexedDB获取内容
+          const request = objectStore.get(id);
+
+          request.onsuccess = function(event) {
+              // 如果找到了对应的内容，就加载到Quill中
+              if (request.result) {
+                  console.log("Quill content loaded successfully.");
+                  current_doc_id = id;
+                  quill.setContents(request.result.content);
+                  var saveButton = document.querySelector('#save-doc');
+                  saveButton.disabled = true;
+
+              } else {
+                  console.log("No Quill content found for id: ", id);
+              }
+          };
+
+          request.onerror = function(event) {
+              console.log("Failed to load Quill content: ", event.target.error);
+          };
+      }
+
+
+
+
+
+
+
+
+
+
+
+
+      // new click
+
+      document.getElementById('new-doc').addEventListener('click', function()
+      {
+          // save old doc
+
+          saveQuill(current_doc_id, quill);
+
+
+          // new doc
+
+          current_doc_id = create_UUID();
+          clearEditor();
+          resetTitle();
+
+          var t = new Date();
+          addDocToDirJson(current_dir_json, current_doc_id, t);
+
+          //save dir json
+          updateDBValue(current_dir_id, current_dir_json);
+          display_dir_list(current_dir_json);
+          //save new doc
+          saveQuill(current_doc_id, quill);
+      });
+
+
+
+
+      // save click
+
+      let saveButton = document.getElementById('save-doc');
+
+      saveButton.addEventListener('click', function() {
+            // 调用saveDoc函数，将内容保存到数据库
+            saveQuill(current_doc_id, quill);
+      });
+
+
+
+
+      // title修改保存
+
+      document.getElementById('title').onchange = function() {
+
+        if((typeof current_dir_json !== undefined) && (typeof current_doc_id !== undefined))
+        {
+          var newTitle = document.querySelector('input').value;
+          updateTitleInJson(current_dir_json, current_doc_id, newTitle);
+          //save dir json
+          updateDBValue(current_dir_id, current_dir_json);
+          display_dir_list(current_dir_json);
+        }
+      };
+
+
+
+
+      // quill
+
+      var quill = new Quill('#quill', {
+        theme: 'snow'
+      });
+
+
+      // quill change
+
+
+      quill.on('text-change', function(delta, source) {
+        console.log('text changed');
+        var saveButton = document.querySelector('#save-doc');
+        saveButton.disabled = false;
+      });
+
+
+
+
+
+//GUI resize
+
+      var resizer = document.getElementById('resizer');
+      var docList = document.getElementById('doc-list');
+      var editor = document.getElementById('editor');
+
+      resizer.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        window.addEventListener('mousemove', resize);
+        window.addEventListener('mouseup', stopResize);
+      });
+
+      function resize(e) {
+        docList.style.width = (e.clientX - docList.offsetLeft) + 'px';
+        editor.style.width = (window.innerWidth - e.clientX) + 'px';
+      }
+
+      function stopResize() {
+        window.removeEventListener('mousemove', resize);
+      }
+
+
+
+
+
+      init_mynotes();
+
+
+
+    </script>
+
+</body>
+</html>
